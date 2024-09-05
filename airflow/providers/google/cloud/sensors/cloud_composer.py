@@ -169,6 +169,7 @@ class CloudComposerDAGRunSensor(BaseSensorOperator):
         region: str,
         environment_id: str,
         composer_dag_id: str,
+        composer_dag_run_id: str | None = None,
         allowed_states: Iterable[str] | None = None,
         execution_range: timedelta | list[datetime] | None = None,
         gcp_conn_id: str = "google_cloud_default",
@@ -182,6 +183,7 @@ class CloudComposerDAGRunSensor(BaseSensorOperator):
         self.region = region
         self.environment_id = environment_id
         self.composer_dag_id = composer_dag_id
+        self.composer_dag_run_id = composer_dag_run_id
         self.allowed_states = list(allowed_states) if allowed_states else [TaskInstanceState.SUCCESS.value]
         self.execution_range = execution_range
         self.gcp_conn_id = gcp_conn_id
@@ -196,9 +198,9 @@ class CloudComposerDAGRunSensor(BaseSensorOperator):
             else:
                 return context["logical_date"] - self.execution_range, context["logical_date"]
         elif isinstance(self.execution_range, list) and len(self.execution_range) > 0:
-            return self.execution_range[0], self.execution_range[1] if len(
-                self.execution_range
-            ) > 1 else context["logical_date"]
+            return self.execution_range[0], (
+                self.execution_range[1] if len(self.execution_range) > 1 else context["logical_date"]
+            )
         else:
             return context["logical_date"] - timedelta(1), context["logical_date"]
 
@@ -240,6 +242,10 @@ class CloudComposerDAGRunSensor(BaseSensorOperator):
             execution_cmd_info=ExecuteAirflowCommandResponse.to_dict(dag_runs_cmd),
         )
         dag_runs = json.loads(cmd_result["output"][0]["content"])
+
+        if self.composer_dag_run_id is not None:
+            dag_runs = [dag_run for dag_run in dag_runs if dag_run["run_id"] == self.composer_dag_run_id]
+
         return dag_runs
 
     def _check_dag_runs_states(
@@ -248,6 +254,8 @@ class CloudComposerDAGRunSensor(BaseSensorOperator):
         start_date: datetime,
         end_date: datetime,
     ) -> bool:
+        if len(dag_runs) == 0:
+            return False
         for dag_run in dag_runs:
             if (
                 start_date.timestamp()
